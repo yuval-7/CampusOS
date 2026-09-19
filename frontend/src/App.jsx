@@ -1,8 +1,17 @@
-
 import { useEffect, useState } from 'react'
 import './App.css'
 
-const API = 'https://campusos-backend-brhu.onrender.com'
+const API = 'https://campus-os-99x6.vercel.app/'
+
+const ENDPOINTS = [
+  ['subjects', '/subjects'],
+  ['tasks', '/tasks'],
+  ['classes', '/timetable'],
+  ['attendance', '/attendance'],
+  ['exams', '/exams'],
+  ['notes', '/notes'],
+  ['expenses', '/expenses'],
+]
 
 function formatTime(value) {
   if (typeof value === 'number') {
@@ -27,8 +36,11 @@ function formatTime(value) {
 function App() {
   const [page, setPage] = useState('Dashboard')
   const [modal, setModal] = useState(null)
-  const [loading, setLoading] = useState(true)
+
+  // The app itself is never blocked by backend loading.
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [failedSections, setFailedSections] = useState([])
 
   const [subjects, setSubjects] = useState([])
   const [tasks, setTasks] = useState([])
@@ -49,61 +61,132 @@ function App() {
     ['💰', 'Expenses'],
   ]
 
-  async function api(path, options = {}) {
-    const response = await fetch(`${API}${path}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
-      ...options,
-    })
+  async function api(path, options = {}, retries = 1) {
+    let lastError
 
-    if (!response.ok) {
-      const message = await response.text()
-      throw new Error(message || 'API request failed')
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController()
+
+      const timeout = setTimeout(() => {
+        controller.abort()
+      }, 25000)
+
+      try {
+        const isGet = !options.method || options.method === 'GET'
+
+        const response = await fetch(`${API}${path}`, {
+          ...options,
+          headers: {
+            ...(isGet ? {} : { 'Content-Type': 'application/json' }),
+            ...(options.headers || {}),
+          },
+          signal: controller.signal,
+        })
+
+        const text = await response.text()
+
+        if (!response.ok) {
+          throw new Error(
+            text || `API request failed with status ${response.status}`
+          )
+        }
+
+        try {
+          return JSON.parse(text)
+        } catch {
+          throw new Error(`Invalid JSON response from ${path}`)
+        }
+      } catch (err) {
+        lastError = err
+
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1500))
+        }
+      } finally {
+        clearTimeout(timeout)
+      }
     }
 
-    return response.json()
+    if (lastError?.name === 'AbortError') {
+      throw new Error(`${path} timed out while waking the backend`)
+    }
+
+    throw new Error(
+      `${path}: ${lastError?.message || 'Request failed'}`
+    )
   }
 
   async function loadData() {
     setLoading(true)
     setError('')
+    setFailedSections([])
 
-    try {
-      const results = await Promise.all([
-        api('/subjects'),
-        api('/tasks'),
-        api('/timetable'),
-        api('/attendance'),
-        api('/exams'),
-        api('/notes'),
-        api('/expenses'),
-      ])
+    const results = await Promise.allSettled(
+      ENDPOINTS.map(async ([name, path]) => {
+        const data = await api(path)
 
-      const [
-        subjectsData,
-        tasksData,
-        timetableData,
-        attendanceData,
-        examsData,
-        notesData,
-        expensesData,
-      ] = results
+        return {
+          name,
+          path,
+          data,
+        }
+      })
+    )
 
-      setSubjects(subjectsData) // harry code is the goat of coding he knows c python and java 
-      setTasks(tasksData)
-      setClasses(timetableData)
-      setAttendance(attendanceData)
-      setExams(examsData)
-      setNotes(notesData)
-      setExpenses(expensesData)
-    } catch (err) {
-      console.error('CampusOS load error:', err)
-      setError('Could not load CampusOS data: ${err.message}')
-    } finally {
-      setLoading(false)
+    const failed = []
+
+    results.forEach(result => {
+      if (result.status === 'fulfilled') {
+        const { name, data } = result.value
+
+        if (name === 'subjects') {
+          setSubjects(Array.isArray(data) ? data : [])
+        }
+
+        if (name === 'tasks') {
+          setTasks(Array.isArray(data) ? data : [])
+        }
+
+        if (name === 'classes') {
+          setClasses(Array.isArray(data) ? data : [])
+        }
+
+        if (name === 'attendance') {
+          setAttendance(Array.isArray(data) ? data : [])
+        }
+
+        if (name === 'exams') {
+          setExams(Array.isArray(data) ? data : [])
+        }
+
+        if (name === 'notes') {
+          setNotes(Array.isArray(data) ? data : [])
+        }
+
+        if (name === 'expenses') {
+          setExpenses(Array.isArray(data) ? data : [])
+        }
+      } else {
+        const message = result.reason?.message || 'Request failed'
+
+        failed.push(message)
+        console.error('CampusOS API error:', message)
+      }
+    })
+
+    setFailedSections(failed)
+
+    if (failed.length === ENDPOINTS.length) {
+      setError(
+        'CampusOS could not reach the backend. It may still be waking up — try Retry.'
+      )
+    } else if (failed.length > 0) {
+      setError(
+        'Some CampusOS data could not load. You can keep using the app and retry.'
+      )
     }
+
+    setLoading(false)
   }
 
   useEffect(() => {
@@ -239,8 +322,10 @@ function App() {
       setModal(null)
       await loadData()
     } catch (err) {
-      console.error(err)
-      setError('Something went wrong while saving.')
+      console.error('CampusOS save error:', err)
+      setError(
+        `Something went wrong while saving: ${err.message}`
+      )
     }
   }
 
@@ -264,8 +349,10 @@ function App() {
 
       await loadData()
     } catch (err) {
-      console.error(err)
-      setError('Something went wrong while deleting.')
+      console.error('CampusOS delete error:', err)
+      setError(
+        `Something went wrong while deleting: ${err.message}`
+      )
     }
   }
 
@@ -279,8 +366,10 @@ function App() {
 
       await loadData()
     } catch (err) {
-      console.error(err)
-      setError('Could not update the task.')
+      console.error('CampusOS task error:', err)
+      setError(
+        `Could not update the task: ${err.message}`
+      )
     }
   }
 
@@ -306,6 +395,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">C</div>
+
           <div>
             <strong>CampusOS</strong>
             <span>Student OS</span>
@@ -318,7 +408,9 @@ function App() {
           {navItems.map(([icon, name]) => (
             <button
               key={name}
-              className={`nav-item ${page === name ? 'active' : ''}`}
+              className={`nav-item ${
+                page === name ? 'active' : ''
+              }`}
               onClick={() => setPage(name)}
             >
               <span>{icon}</span>
@@ -330,6 +422,7 @@ function App() {
         <div className="sidebar-bottom">
           <div className="tip">
             <span>💡</span>
+
             <div>
               <strong>CampusOS</strong>
               <p>Your personal student workspace.</p>
@@ -340,8 +433,18 @@ function App() {
 
       <main className="main">
         {loading && (
-          <div className="panel">
-            <strong>Loading CampusOS...</strong>
+          <div
+            className="panel"
+            style={{
+              marginBottom: '18px',
+              color: '#526071',
+              background: '#f8fafc',
+            }}
+          >
+            <strong>Connecting to CampusOS...</strong>
+            <p style={{ margin: '6px 0 0' }}>
+              The backend may be waking up. Your dashboard is still available.
+            </p>
           </div>
         )}
 
@@ -350,11 +453,21 @@ function App() {
             className="panel"
             style={{
               marginBottom: '18px',
-              color: '#c13d3d',
-              background: '#fff7f7',
+              color: '#9a4b00',
+              background: '#fff8ed',
             }}
           >
-            {error}
+            <strong>{error}</strong>
+
+            <div style={{ marginTop: '10px' }}>
+              <button
+                className="primary-button"
+                onClick={loadData}
+                disabled={loading}
+              >
+                {loading ? 'Retrying...' : 'Retry'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -423,6 +536,7 @@ function App() {
 
                       <div className="schedule-content">
                         <strong>{item.subject}</strong>
+
                         <span>
                           📍 {item.room || 'No room'} · {item.day}
                         </span>
@@ -490,11 +604,15 @@ function App() {
                   <EmptyState text="No subjects added yet." />
                 ) : (
                   subjects.map(subject => (
-                    <div className="subject-row" key={subject.id}>
+                    <div
+                      className="subject-row"
+                      key={subject.id}
+                    >
                       <div className="subject-icon">📚</div>
 
                       <div>
                         <strong>{subject.name}</strong>
+
                         <span>
                           {subject.teacher || 'No teacher'}
                         </span>
@@ -514,9 +632,13 @@ function App() {
                   <EmptyState text="No exams added yet." />
                 ) : (
                   exams.map(exam => (
-                    <div className="data-row" key={exam.id}>
+                    <div
+                      className="data-row"
+                      key={exam.id}
+                    >
                       <div>
                         <strong>{exam.title}</strong>
+
                         <span>
                           {exam.subject || 'No subject'} ·{' '}
                           {exam.exam_date || 'No date'}
@@ -541,9 +663,13 @@ function App() {
               <EmptyState text="No subjects added yet." />
             ) : (
               subjects.map(subject => (
-                <div className="data-row" key={subject.id}>
+                <div
+                  className="data-row"
+                  key={subject.id}
+                >
                   <div>
                     <strong>{subject.name}</strong>
+
                     <span>
                       {subject.teacher || 'No teacher'}
                     </span>
@@ -574,7 +700,10 @@ function App() {
               <EmptyState text="No tasks added yet." />
             ) : (
               tasks.map(task => (
-                <div className="data-row" key={task.id}>
+                <div
+                  className="data-row"
+                  key={task.id}
+                >
                   <div className="task-left">
                     <button
                       className={`check-button ${
@@ -588,15 +717,20 @@ function App() {
                     <div>
                       <strong
                         className={
-                          task.completed ? 'completed' : ''
+                          task.completed
+                            ? 'completed'
+                            : ''
                         }
                       >
                         {task.title}
                       </strong>
 
                       <span>
-                        {task.description || 'No description'} ·{' '}
-                        {task.due_date || 'No due date'}
+                        {task.description ||
+                          'No description'}{' '}
+                        ·{' '}
+                        {task.due_date ||
+                          'No due date'}
                       </span>
                     </div>
                   </div>
@@ -646,29 +780,49 @@ function App() {
                 )
 
                 return (
-                  <div className="day-card" key={day}>
+                  <div
+                    className="day-card"
+                    key={day}
+                  >
                     <h3>{day}</h3>
 
                     {dayClasses.length === 0 ? (
-                      <p className="muted">No classes</p>
+                      <p className="muted">
+                        No classes
+                      </p>
                     ) : (
                       dayClasses.map(item => (
-                        <div className="class-card" key={item.id}>
-                          <strong>{item.subject}</strong>
+                        <div
+                          className="class-card"
+                          key={item.id}
+                        >
+                          <strong>
+                            {item.subject}
+                          </strong>
 
                           <span>
-                            {formatTime(item.start_time)} –{' '}
-                            {formatTime(item.end_time)}
+                            {formatTime(
+                              item.start_time
+                            )}{' '}
+                            –{' '}
+                            {formatTime(
+                              item.end_time
+                            )}
                           </span>
 
                           <span>
-                            📍 {item.room || 'No room'}
+                            📍{' '}
+                            {item.room ||
+                              'No room'}
                           </span>
 
                           <button
                             className="delete-button"
                             onClick={() =>
-                              deleteItem('class', item.id)
+                              deleteItem(
+                                'class',
+                                item.id
+                              )
                             }
                           >
                             Delete
@@ -711,7 +865,9 @@ function App() {
 
                   const percentage =
                     held > 0
-                      ? Math.round((attended / held) * 100)
+                      ? Math.round(
+                          (attended / held) * 100
+                        )
                       : 0
 
                   return (
@@ -719,12 +875,16 @@ function App() {
                       className="attendance-card"
                       key={subject.id}
                     >
-                      <div className="subject-icon">📚</div>
+                      <div className="subject-icon">
+                        📚
+                      </div>
 
                       <h3>{subject.name}</h3>
 
                       <div className="attendance-percent">
-                        {held ? `${percentage}%` : '—'}
+                        {held
+                          ? `${percentage}%`
+                          : '—'}
                       </div>
 
                       <div className="progress">
@@ -759,20 +919,29 @@ function App() {
               <EmptyState text="No exams added yet." />
             ) : (
               exams.map(exam => (
-                <div className="data-row" key={exam.id}>
+                <div
+                  className="data-row"
+                  key={exam.id}
+                >
                   <div>
                     <strong>{exam.title}</strong>
 
                     <span>
-                      {exam.subject || 'No subject'} ·{' '}
-                      {exam.exam_date || 'No date'}
+                      {exam.subject ||
+                        'No subject'}{' '}
+                      ·{' '}
+                      {exam.exam_date ||
+                        'No date'}
                     </span>
                   </div>
 
                   <button
                     className="delete-button"
                     onClick={() =>
-                      deleteItem('exam', exam.id)
+                      deleteItem(
+                        'exam',
+                        exam.id
+                      )
                     }
                   >
                     Delete
@@ -795,7 +964,10 @@ function App() {
             ) : (
               <div className="notes-grid">
                 {notes.map(note => (
-                  <div className="note-card" key={note.id}>
+                  <div
+                    className="note-card"
+                    key={note.id}
+                  >
                     <span>📒</span>
 
                     <h3>{note.title}</h3>
@@ -805,7 +977,10 @@ function App() {
                     <button
                       className="delete-button"
                       onClick={() =>
-                        deleteItem('note', note.id)
+                        deleteItem(
+                          'note',
+                          note.id
+                        )
                       }
                     >
                       Delete
@@ -832,7 +1007,10 @@ function App() {
                 {expenses
                   .reduce(
                     (sum, item) =>
-                      sum + Number(item.amount || 0),
+                      sum +
+                      Number(
+                        item.amount || 0
+                      ),
                     0
                   )
                   .toFixed(2)}
@@ -848,22 +1026,33 @@ function App() {
                   key={expense.id}
                 >
                   <div>
-                    <strong>{expense.title}</strong>
+                    <strong>
+                      {expense.title}
+                    </strong>
 
                     <span>
-                      {expense.category || 'Other'} ·{' '}
-                      {expense.expense_date || 'No date'}
+                      {expense.category ||
+                        'Other'}{' '}
+                      ·{' '}
+                      {expense.expense_date ||
+                        'No date'}
                     </span>
                   </div>
 
                   <strong>
-                    ₹{Number(expense.amount).toFixed(2)}
+                    ₹
+                    {Number(
+                      expense.amount
+                    ).toFixed(2)}
                   </strong>
 
                   <button
                     className="delete-button"
                     onClick={() =>
-                      deleteItem('expense', expense.id)
+                      deleteItem(
+                        'expense',
+                        expense.id
+                      )
                     }
                   >
                     Delete
@@ -879,7 +1068,9 @@ function App() {
         <Modal
           type={modal}
           onClose={() => setModal(null)}
-          onSubmit={data => addItem(modal, data)}
+          onSubmit={data =>
+            addItem(modal, data)
+          }
           subjects={subjects}
         />
       )}
@@ -903,7 +1094,9 @@ function ResourcePage({
         onClick={onAdd}
       />
 
-      <div className="panel">{children}</div>
+      <div className="panel">
+        {children}
+      </div>
     </>
   )
 }
@@ -969,10 +1162,14 @@ function StatCard({
   return (
     <div className="stat-card">
       <div className="stat-top">
-        <div className="stat-icon">{icon}</div>
+        <div className="stat-icon">
+          {icon}
+        </div>
       </div>
 
-      <strong className="stat-value">{value}</strong>
+      <strong className="stat-value">
+        {value}
+      </strong>
 
       <h3>{title}</h3>
 
@@ -985,7 +1182,9 @@ function EmptyState({ text }) {
   return (
     <div className="empty">
       <div>📭</div>
+
       <h3>{text}</h3>
+
       <p>Add something to see it here.</p>
     </div>
   )
@@ -1106,7 +1305,8 @@ function Modal({
               <label key={key}>
                 {label}
 
-                {inputType === 'textarea' ? (
+                {inputType ===
+                'textarea' ? (
                   <textarea
                     value={form[key] || ''}
                     onChange={e =>
@@ -1117,7 +1317,8 @@ function Modal({
                     }
                     required={required}
                   />
-                ) : type === 'attendance' &&
+                ) : type ===
+                    'attendance' &&
                   key === 'subjectId' ? (
                   <select
                     value={form[key] || ''}
@@ -1133,16 +1334,23 @@ function Modal({
                       Select subject
                     </option>
 
-                    {subjects.map(subject => (
-                      <option
-                        key={subject.id}
-                        value={subject.id}
-                      >
-                        {subject.name}
-                      </option>
-                    ))}
+                    {subjects.map(
+                      subject => (
+                        <option
+                          key={
+                            subject.id
+                          }
+                          value={
+                            subject.id
+                          }
+                        >
+                          {subject.name}
+                        </option>
+                      )
+                    )}
                   </select>
-                ) : type === 'class' &&
+                ) : type ===
+                    'class' &&
                   key === 'subject' ? (
                   <select
                     value={form[key] || ''}
@@ -1158,16 +1366,23 @@ function Modal({
                       Select subject
                     </option>
 
-                    {subjects.map(subject => (
-                      <option
-                        key={subject.id}
-                        value={subject.name}
-                      >
-                        {subject.name}
-                      </option>
-                    ))}
+                    {subjects.map(
+                      subject => (
+                        <option
+                          key={
+                            subject.id
+                          }
+                          value={
+                            subject.name
+                          }
+                        >
+                          {subject.name}
+                        </option>
+                      )
+                    )}
                   </select>
-                ) : type === 'exam' &&
+                ) : type ===
+                    'exam' &&
                   key === 'subject' ? (
                   <select
                     value={form[key] || ''}
@@ -1183,16 +1398,23 @@ function Modal({
                       Select subject
                     </option>
 
-                    {subjects.map(subject => (
-                      <option
-                        key={subject.id}
-                        value={subject.name}
-                      >
-                        {subject.name}
-                      </option>
-                    ))}
+                    {subjects.map(
+                      subject => (
+                        <option
+                          key={
+                            subject.id
+                          }
+                          value={
+                            subject.name
+                          }
+                        >
+                          {subject.name}
+                        </option>
+                      )
+                    )}
                   </select>
-                ) : type === 'note' &&
+                ) : type ===
+                    'note' &&
                   key === 'subject' ? (
                   <select
                     value={form[key] || ''}
@@ -1207,14 +1429,20 @@ function Modal({
                       No subject
                     </option>
 
-                    {subjects.map(subject => (
-                      <option
-                        key={subject.id}
-                        value={subject.name}
-                      >
-                        {subject.name}
-                      </option>
-                    ))}
+                    {subjects.map(
+                      subject => (
+                        <option
+                          key={
+                            subject.id
+                          }
+                          value={
+                            subject.name
+                          }
+                        >
+                          {subject.name}
+                        </option>
+                      )
+                    )}
                   </select>
                 ) : (
                   <input
@@ -1328,4 +1556,3 @@ function Modal({
 }
 
 export default App
-
