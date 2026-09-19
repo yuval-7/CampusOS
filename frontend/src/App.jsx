@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-const API = 'http://127.0.0.1:8000'
+const API = 'https://campusos-backend-brhu.onrender.com'
 
 function formatTime(value) {
   if (typeof value === 'number') {
