@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
-const API = 'https://campus-os-99x6.vercel.app/'
+const API = 'https://campus-os-99x6.vercel.app'
 
 const ENDPOINTS = [
   ['subjects', '/subjects'],
