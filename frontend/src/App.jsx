@@ -91,7 +91,7 @@ function App() {
         expensesData,
       ] = results
 
-      setSubjects(subjectsData)
+      setSubjects(subjectsData) // harry code is the goat of coding he knows c python and java 
       setTasks(tasksData)
       setClasses(timetableData)
       setAttendance(attendanceData)
@@ -100,7 +100,7 @@ function App() {
       setExpenses(expensesData)
     } catch (err) {
       console.error('CampusOS load error:', err)
-      setError('Could not load CampusOS data.')
+      setError('Could not load CampusOS data: ${err.message}')
     } finally {
       setLoading(false)
     }
