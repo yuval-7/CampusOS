@@ -67,19 +67,11 @@ function App() {
   }
 
   async function loadData() {
-    try {
-      setLoading(true)
-      setError('')
+    setLoading(true)
+    setError('')
 
-      const [
-        subjectsData,
-        tasksData,
-        timetableData,
-        attendanceData,
-        examsData,
-        notesData,
-        expensesData,
-      ] = await Promise.all([
+    try {
+      const results = await Promise.all([
         api('/subjects'),
         api('/tasks'),
         api('/timetable'),
@@ -89,6 +81,16 @@ function App() {
         api('/expenses'),
       ])
 
+      const [
+        subjectsData,
+        tasksData,
+        timetableData,
+        attendanceData,
+        examsData,
+        notesData,
+        expensesData,
+      ] = results
+
       setSubjects(subjectsData)
       setTasks(tasksData)
       setClasses(timetableData)
@@ -97,8 +99,8 @@ function App() {
       setNotes(notesData)
       setExpenses(expensesData)
     } catch (err) {
-      console.error(err)
-      setError('Could not connect to the CampusOS backend.')
+      console.error('CampusOS load error:', err)
+      setError('Could not load CampusOS data.')
     } finally {
       setLoading(false)
     }
