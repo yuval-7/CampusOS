@@ -370,7 +370,7 @@ CampusOS brings those everyday student-management tasks into one centralized das
 
 Built as a Hack Club project using modern full-stack web technologies.
 
-Made with React, FastAPI, MySQL, GitHub, and Vercel. 🚀
+Made with React, FastAPI, MySQL, GitHub, and Vercel. 
 
 ---
 
